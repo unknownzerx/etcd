@@ -33,6 +33,7 @@ var (
 	// interruptHandlers holds all registered InterruptHandlers in order
 	// they will be executed.
 	interruptHandlers = []InterruptHandler{}
+	handling = false
 )
 
 // RegisterInterruptHandler registers a new InterruptHandler. Handlers registered
@@ -45,6 +46,11 @@ func RegisterInterruptHandler(h InterruptHandler) {
 
 // HandleInterrupts calls the handler functions on receiving a SIGINT or SIGTERM.
 func HandleInterrupts() {
+	if handling {
+		return
+	}
+	handling = true
+	
 	notifier := make(chan os.Signal, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 
@@ -71,6 +77,22 @@ func HandleInterrupts() {
 		}
 		syscall.Kill(pid, sig.(syscall.Signal))
 	}()
+}
+
+func XStopEtcd() {
+	interruptRegisterMu.Lock()
+	ihs := make([]InterruptHandler, len(interruptHandlers))
+	copy(ihs, interruptHandlers)
+	// clear it
+	interruptHandlers = []InterruptHandler{}
+	interruptRegisterMu.Unlock()
+
+	interruptExitMu.Lock()
+
+	for _, h := range ihs {
+		h()
+	}
+	interruptExitMu.Unlock()
 }
 
 // Exit relays to os.Exit if no interrupt handlers are running, blocks otherwise.

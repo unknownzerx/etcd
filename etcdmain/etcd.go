@@ -54,10 +54,10 @@ var (
 	dirEmpty  = dirType("empty")
 )
 
-func Main() {
+func Main2(args []string) {
 	capnslog.SetFormatter(capnslog.NewStringFormatter(os.Stderr))
 	cfg := NewConfig()
-	err := cfg.Parse(os.Args[1:])
+	err := cfg.Parse(args)
 	if err != nil {
 		log.Printf("error verifying flags, %v. See 'etcd -help'.", err)
 		switch err {
@@ -111,6 +111,14 @@ func Main() {
 	osutil.HandleInterrupts()
 
 	<-stopped
+}
+
+func StopEtcd() {
+	osutil.XStopEtcd()
+}
+
+func Main() {
+	Main2(os.Args[1:])
 	osutil.Exit(0)
 }
 
@@ -207,7 +215,10 @@ func startEtcd(cfg *config) (<-chan struct{}, error) {
 	// Start the peer server in a goroutine
 	for _, l := range plns {
 		go func(l net.Listener) {
-			log.Fatal(serveHTTP(l, ph, 5*time.Minute))
+			err := serveHTTP(l, ph, 5*time.Minute)
+			// I am ignoring the error 'closed listener'
+			// TODO handle other errors..
+			fmt.Println(err.Error())
 		}(l)
 	}
 	// Start a client server goroutine for each listen address
@@ -215,9 +226,16 @@ func startEtcd(cfg *config) (<-chan struct{}, error) {
 		go func(l net.Listener) {
 			// read timeout does not work with http close notify
 			// TODO: https://github.com/golang/go/issues/9524
-			log.Fatal(serveHTTP(l, ch, 0))
+			err := serveHTTP(l, ch, 0)
+			fmt.Println(err.Error())
 		}(l)
 	}
+	osutil.RegisterInterruptHandler(func() {
+		for _, l := range append(plns, clns...) {
+			l.Close()
+			log.Infof("*** close listener: ", l.Addr().String())
+		}
+	})
 	return s.StopNotify(), nil
 }
 
